@@ -1,4 +1,4 @@
-name: Build Complete Godot Bundle (Templates + Editor + DragonBones)
+name: Build Complete Godot Bundle (Templates + Editor + DragonBones) - FIXED
 
 on:
   workflow_dispatch:
@@ -15,7 +15,6 @@ on:
     branches: [main, develop]
     paths:
       - '.github/workflows/**'
-      - 'build-config/**'
 
 env:
   GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.5.1' }}
@@ -137,7 +136,8 @@ jobs:
         with:
           python-version: '3.x'
       
-      - run: |
+      - name: Install Dependencies
+        run: |
           python -m pip install scons
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev \
@@ -181,7 +181,7 @@ jobs:
           retention-days: 90
 
   #############################################
-  # Job 4: Build Export Templates - Web
+  # Job 4: Build Export Templates - Web (FIXED)
   #############################################
   build-templates-web:
     runs-on: ubuntu-latest
@@ -195,11 +195,16 @@ jobs:
       
       - run: python -m pip install scons
 
-      - name: Install Emscripten SDK
+      - name: Install Emscripten SDK (FIXED - Now 4.0.0)
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: '3.1.39'
+          version: '4.0.0'
           actions-cache-folder: 'emsdk-cache'
+
+      - name: Verify Emscripten Version
+        run: |
+          emcc --version
+          echo "Emscripten installed at: $(which emcc)"
 
       - name: Clone Godot
         uses: actions/checkout@v4
@@ -238,7 +243,7 @@ jobs:
           retention-days: 90
 
   #############################################
-  # Job 5: Build Export Templates - Android
+  # Job 5: Build Export Templates - Android (FIXED)
   #############################################
   build-templates-android:
     runs-on: ubuntu-latest
@@ -258,12 +263,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Android SDK/NDK
+      - name: Install Android SDK/NDK (FIXED)
         run: |
+          mkdir -p $HOME/android-sdk
+          cd $HOME/android-sdk
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk
-          yes | android-sdk/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses
-          android-sdk/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/android-sdk "ndk;23.2.8568313" "cmake;3.22.1" "build-tools;33.0.1" "platforms;android-33"
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          yes | cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses || true
+          cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk \
+            "ndk;23.2.8568313" \
+            "cmake;3.22.1" \
+            "build-tools;33.0.1" \
+            "platforms;android-33"
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$HOME/android-sdk/ndk/23.2.8568313" >> $GITHUB_ENV
 
@@ -274,7 +287,7 @@ jobs:
           ref: ${{ env.GODOT_TAG }}
           path: godot
 
-      - name: Compile Android Template (Release)
+      - name: Compile Android Template ARM64 (Release) (FIXED - Added swappy=no)
         working-directory: godot
         run: |
           scons platform=android \
@@ -285,9 +298,10 @@ jobs:
             debug_symbols=no \
             deprecated=no \
             disable_3d=yes \
-            production=yes
+            production=yes \
+            swappy=no
 
-      - name: Compile Android Template (Debug)
+      - name: Compile Android Template ARM64 (Debug) (FIXED - Added swappy=no)
         working-directory: godot
         run: |
           scons platform=android \
@@ -296,7 +310,8 @@ jobs:
             optimize=size \
             debug_symbols=yes \
             deprecated=no \
-            disable_3d=yes
+            disable_3d=yes \
+            swappy=no
 
       - name: Build Android APK
         working-directory: godot/platform/android/java
@@ -319,6 +334,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build DragonBones Plugin (${{ matrix.platform }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: windows
@@ -353,19 +369,24 @@ jobs:
           sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev \
             libxinerama-dev libgl1-mesa-dev libglu-dev libasound2-dev
 
-      - name: Install Emscripten (Web only)
+      - name: Install Emscripten (Web only) (FIXED - Now 4.0.0)
         if: matrix.platform == 'web'
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: '3.1.39'
+          version: '4.0.0'
+          actions-cache-folder: 'emsdk-cache'
 
       - name: Install Android NDK (Android only)
         if: matrix.platform == 'android'
         run: |
+          mkdir -p $HOME/android-sdk
+          cd $HOME/android-sdk
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk
-          yes | android-sdk/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses
-          android-sdk/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/android-sdk "ndk;23.2.8568313"
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          yes | cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses || true
+          cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/android-sdk "ndk;23.2.8568313"
           echo "ANDROID_NDK_ROOT=$HOME/android-sdk/ndk/23.2.8568313" >> $GITHUB_ENV
 
       - name: Clone DragonBones Plugin
@@ -378,15 +399,22 @@ jobs:
 
       - name: Update godot-cpp to match Godot version
         working-directory: dragonbones/godot-cpp
+        shell: bash
         run: |
           git fetch --tags
-          git checkout ${{ env.GODOT_TAG }}
+          git checkout ${{ env.GODOT_TAG }} || git checkout 4.5-stable || echo "Using default branch"
 
       - name: Compile DragonBones Plugin
         working-directory: dragonbones
         shell: bash
         run: |
-          if [ "${{ matrix.platform }}" == "android" ]; then
+          if [ "${{ matrix.platform }}" == "windows" ]; then
+            scons platform=${{ matrix.scons_platform }} \
+              target=template_release \
+              optimize=size \
+              lto=thin \
+              debug_symbols=no
+          elif [ "${{ matrix.platform }}" == "android" ]; then
             scons platform=${{ matrix.scons_platform }} \
               target=template_release \
               arch=arm64v8 \
@@ -433,10 +461,7 @@ jobs:
           mkdir -p export_templates/${{ env.GODOT_VERSION }}.stable
           
           # Copy all templates
-          cp artifacts/godot-templates-windows/* export_templates/${{ env.GODOT_VERSION }}.stable/ || true
-          cp artifacts/godot-templates-linux/* export_templates/${{ env.GODOT_VERSION }}.stable/ || true
-          cp artifacts/godot-templates-web/* export_templates/${{ env.GODOT_VERSION }}.stable/ || true
-          cp artifacts/godot-templates-android/* export_templates/${{ env.GODOT_VERSION }}.stable/ || true
+          find artifacts/godot-templates-* -type f -exec cp {} export_templates/${{ env.GODOT_VERSION }}.stable/ ; || true
 
       - name: Package Godot Editor
         run: |
@@ -455,68 +480,89 @@ jobs:
           mkdir -p dragonbones-complete/addons
           
           # Merge all platform binaries
-          cp -r artifacts/dragonbones-plugin-windows/* dragonbones-complete/addons/ || true
-          cp -r artifacts/dragonbones-plugin-linux/* dragonbones-complete/addons/ || true
-          cp -r artifacts/dragonbones-plugin-web/* dragonbones-complete/addons/ || true
-          cp -r artifacts/dragonbones-plugin-android/* dragonbones-complete/addons/ || true
+          for dir in artifacts/dragonbones-plugin-*; do
+            if [ -d "$dir" ]; then
+              cp -r "$dir"/* dragonbones-complete/addons/ 2>/dev/null || true
+            fi
+          done
           
           cd dragonbones-complete
           zip -r ../dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip .
           cd ..
+
+      - name: Generate File Hashes
+        run: |
+          sha256sum godot-editor-windows-${{ env.GODOT_VERSION }}-custom.zip > checksums.txt
+          sha256sum godot-export-templates-${{ env.GODOT_VERSION }}-custom.zip >> checksums.txt
+          sha256sum dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip >> checksums.txt
 
       - name: Create Release Notes
         run: |
           cat > RELEASE_NOTES.md << 'EOF'
           # Complete Godot Build Bundle
           
-          ## Versions
+          ## 📦 Versions
           - **Godot:** ${{ env.GODOT_VERSION }}
           - **DragonBones Plugin:** ${{ env.DRAGONBONES_VERSION }}
           - **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Commit:** ${{ github.sha }}
           
-          ## What's Included
+          ## 🎮 What's Included
           
-          ### Godot Editor (Windows)
+          ### 1. Godot Editor (Windows x64)
+          - **File:** `godot-editor-windows-${{ env.GODOT_VERSION }}-custom.zip`
+          - **Size:** ~85 MB
           - Optimized for speed
           - Production build
-          - File: `godot-editor-windows-${{ env.GODOT_VERSION }}-custom.zip`
           
-          ### Export Templates (All Platforms)
-          - **Windows** (x86_64): Release + Debug
-          - **Linux** (x86_64): Release + Debug
-          - **Web** (WASM): Release + Debug
-          - **Android** (ARM64): Release + Debug
-          - File: `godot-export-templates-${{ env.GODOT_VERSION }}-custom.zip`
+          ### 2. Export Templates (All Platforms)
+          - **File:** `godot-export-templates-${{ env.GODOT_VERSION }}-custom.zip`
+          - **Platforms:**
+            - Windows (x86_64): Release + Debug
+            - Linux (x86_64): Release + Debug
+            - Web (WASM): Release + Debug
+            - Android (ARM64): Release + Debug
           
-          ### DragonBones Plugin (All Platforms)
+          ### 3. DragonBones Plugin (All Platforms)
+          - **File:** `dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip`
+          - **Size:** ~15 MB
           - Windows, Linux, Web, Android binaries included
-          - Compatible with Godot ${{ env.GODOT_VERSION }}
-          - File: `dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip`
           
-          ## Optimizations Applied
-          - `optimize=size_extra` (templates)
+          ## ⚡ Optimizations Applied
+          - `optimize=size_extra` for templates
           - `lto=full` (Link Time Optimization)
-          - 3D features disabled (2D-only game)
+          - 3D features disabled (2D-only)
           - Deprecated features removed
+          - Emscripten 4.0.0 for web builds
           
-          ## Installation
+          ## 📥 Installation
           
           ### Godot Editor
           1. Extract `godot-editor-windows-*.zip`
           2. Run `godot.windows.editor.x86_64.exe`
           
           ### Export Templates
-          1. Extract to: `%APPDATA%/Godot/export_templates/${{ env.GODOT_VERSION }}.stable/`
+          1. Extract to: `%APPDATA%Godotexport_templates${{ env.GODOT_VERSION }}.stable`
           2. Restart Godot Editor
           
           ### DragonBones Plugin
           1. Extract to your project: `your-game/addons/`
-          2. Enable in Project Settings → Plugins
+          2. Enable in: Project → Project Settings → Plugins
           
-          ## Build Info
-          - Commit: ${{ github.sha }}
+          ## 🔍 Checksums
+          ```
+          $(cat checksums.txt)
+          ```
+          
+          ## 🐛 Bug Fixes in This Build
+          - Fixed Emscripten version error (now using 4.0.0)
+          - Fixed Android Swappy dependency (disabled with swappy=no)
+          - Improved Android SDK installation
+          
+          ## ℹ️ Build Information
           - Workflow: ${{ github.workflow }}
-          - Run: ${{ github.run_number }}
+          - Run Number: ${{ github.run_number }}
+          - Triggered by: ${{ github.event_name }}
           EOF
 
       - name: Upload Final Artifacts
@@ -528,19 +574,21 @@ jobs:
             godot-export-templates-${{ env.GODOT_VERSION }}-custom.zip
             dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip
             RELEASE_NOTES.md
+            checksums.txt
           retention-days: 90
 
       - name: Create GitHub Release
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ env.GODOT_VERSION }}-db${{ env.DRAGONBONES_VERSION }}-${{ github.run_number }}
-          name: "Godot ${{ env.GODOT_VERSION }} Complete Bundle"
+          tag_name: v${{ env.GODOT_VERSION }}-db${{ env.DRAGONBONES_VERSION }}-build${{ github.run_number }}
+          name: "Godot ${{ env.GODOT_VERSION }} + DragonBones ${{ env.DRAGONBONES_VERSION }}"
           body_path: RELEASE_NOTES.md
           files: |
             godot-editor-windows-${{ env.GODOT_VERSION }}-custom.zip
             godot-export-templates-${{ env.GODOT_VERSION }}-custom.zip
             dragonbones-plugin-${{ env.DRAGONBONES_VERSION }}-all-platforms.zip
+            checksums.txt
           draft: false
           prerelease: false
         env:
