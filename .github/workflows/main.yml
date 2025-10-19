@@ -1,303 +1,168 @@
-name: Build Godot Bundle (Production)
+name: Build Godot Bundle
 
 on:
   workflow_dispatch:
     inputs:
       godot_version:
         default: '4.5.1'
-      dragonbones_version:
-        default: '2.0.2'
 
 permissions:
-  contents: write  # Allows creating releases
+  contents: write
 
 env:
   GODOT_VERSION: ${{ github.event.inputs.godot_version || '4.5.1' }}
   GODOT_TAG: ${{ github.event.inputs.godot_version || '4.5.1' }}-stable
-  DRAGONBONES_VERSION: ${{ github.event.inputs.dragonbones_version || '2.0.2' }}
 
 jobs:
-  #############################################
-  # Godot Editor
-  #############################################
   build-godot-editor:
     runs-on: windows-latest
-    name: Editor
     steps:
       - uses: actions/setup-python@v5
         with: {python-version: '3.x'}
       - run: python -m pip install scons
       - uses: ilammy/msvc-dev-cmd@v1
-      
       - uses: actions/checkout@v4
         with:
           repository: godotengine/godot
           ref: ${{ env.GODOT_TAG }}
           path: godot
-
       - working-directory: godot
-        run: |
-          scons platform=windows target=editor `
-            optimize=speed use_lto=yes debug_symbols=no production=yes
-
+        run: scons platform=windows target=editor optimize=speed use_lto=yes debug_symbols=no production=yes
       - uses: actions/upload-artifact@v4
         with:
           name: godot-editor-windows
           path: godot/bin/godot.windows.editor.x86_64.exe
 
-  #############################################
-  # Templates
-  #############################################
   build-godot-templates:
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - {name: 'Windows', os: windows-latest, platform: windows}
-          - {name: 'Linux', os: ubuntu-latest, platform: linuxbsd}
-          - {name: 'Web', os: ubuntu-latest, platform: web}
-          - {name: 'Android', os: ubuntu-latest, platform: android}
-    
+          - {os: windows-latest, platform: windows}
+          - {os: ubuntu-latest, platform: linuxbsd}
+          - {os: ubuntu-latest, platform: web}
+          - {os: ubuntu-latest, platform: android}
     steps:
       - uses: actions/setup-python@v5
         with: {python-version: '3.x'}
       - run: python -m pip install scons
-
       - if: matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1
-
       - if: matrix.platform == 'linuxbsd'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libx11-dev \
-            libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu-dev \
-            libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev
-
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu-dev libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev
       - if: matrix.platform == 'web'
         uses: mymindstorm/setup-emsdk@v14
         with: {version: '4.0.0'}
-
       - if: matrix.platform == 'android'
         uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r23c
-          link-to-sdk: true
-
+        with: {ndk-version: r23c, link-to-sdk: true}
       - uses: actions/checkout@v4
         with:
           repository: godotengine/godot
           ref: ${{ env.GODOT_TAG }}
           path: godot
-
-      - name: Build Release Template
-        working-directory: godot
+      - working-directory: godot
         shell: bash
         run: |
-          ARCH="x86_64"
-          LTO_FLAG="lto=full"
-          EXTRA_ARGS=""
-          
-          if [ "${{ matrix.platform }}" == "windows" ]; then
-            LTO_FLAG="use_lto=yes"
-          elif [ "${{ matrix.platform }}" == "linuxbsd" ]; then
-            LTO_FLAG="lto=full"
-          elif [ "${{ matrix.platform }}" == "web" ]; then
-            ARCH="wasm32"
-            LTO_FLAG="lto=full"
-          elif [ "${{ matrix.platform }}" == "android" ]; then
-            ARCH="arm64v8"
-            LTO_FLAG="lto=thin"
-            EXTRA_ARGS="swappy=no"
-          fi
-          
-          scons platform=${{ matrix.platform }} \
-            target=template_release \
-            arch=$ARCH \
-            optimize=size \
-            $LTO_FLAG \
-            debug_symbols=no \
-            deprecated=no \
-            disable_3d=yes \
-            production=yes \
-            $EXTRA_ARGS
-
-      - name: Build Debug Template
-        working-directory: godot
-        shell: bash
-        run: |
-          ARCH="x86_64"
-          EXTRA_ARGS=""
-          
-          if [ "${{ matrix.platform }}" == "android" ]; then
-            ARCH="arm64v8"
-            EXTRA_ARGS="swappy=no"
-          elif [ "${{ matrix.platform }}" == "web" ]; then
-            ARCH="wasm32"
-          fi
-          
-          scons platform=${{ matrix.platform }} \
-            target=template_debug \
-            arch=$ARCH \
-            optimize=debug \
-            debug_symbols=no \
-            deprecated=no \
-            disable_3d=yes \
-            $EXTRA_ARGS
-
+          ARCH="x86_64"; LTO="lto=full"; EXTRA=""
+          [ "${{ matrix.platform }}" = "windows" ] && LTO="use_lto=yes"
+          [ "${{ matrix.platform }}" = "web" ] && ARCH="wasm32"
+          [ "${{ matrix.platform }}" = "android" ] && ARCH="arm64v8" && LTO="lto=thin" && EXTRA="swappy=no"
+          scons platform=${{ matrix.platform }} target=template_release arch=$ARCH optimize=size $LTO debug_symbols=no deprecated=no disable_3d=yes production=yes $EXTRA
+          scons platform=${{ matrix.platform }} target=template_debug arch=$ARCH optimize=debug debug_symbols=no deprecated=no disable_3d=yes $EXTRA
       - if: matrix.platform == 'android'
         working-directory: godot/platform/android/java
         run: ./gradlew generateGodotTemplates
-
-      - name: Prepare Binaries
-        shell: bash
+      - shell: bash
         run: |
-          mkdir -p final_binaries
-          cd godot/bin
-          
-          if [ "${{ matrix.platform }}" == "windows" ]; then
-            cp -v godot.windows.template_release.*.exe ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.windows.template_debug.*.exe ../../final_binaries/ 2>/dev/null || true
-          elif [ "${{ matrix.platform }}" == "linuxbsd" ]; then
-            cp -v godot.linuxbsd.template_release.* ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.linuxbsd.template_debug.* ../../final_binaries/ 2>/dev/null || true
-          elif [ "${{ matrix.platform }}" == "web" ]; then
-            cp -v godot.web.template_release.*.wasm ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.web.template_release.*.js ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.web.template_debug.*.wasm ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.web.template_debug.*.js ../../final_binaries/ 2>/dev/null || true
-          elif [ "${{ matrix.platform }}" == "android" ]; then
-            cp -v android_*.apk ../../final_binaries/ 2>/dev/null || true
-            cp -v godot.android.template_*.so ../../final_binaries/ 2>/dev/null || true
-          fi
-          
-          cd ../../
-          ls -lh final_binaries/
-
+          mkdir -p final_binaries && cd godot/bin
+          [ "${{ matrix.platform }}" = "windows" ] && cp godot.windows.template_*.exe ../../final_binaries/ 2>/dev/null || true
+          [ "${{ matrix.platform }}" = "linuxbsd" ] && cp godot.linuxbsd.template_* ../../final_binaries/ 2>/dev/null || true
+          [ "${{ matrix.platform }}" = "web" ] && cp godot.web.template_*.{wasm,js} ../../final_binaries/ 2>/dev/null || true
+          [ "${{ matrix.platform }}" = "android" ] && cp android_*.apk godot.android.template_*.so ../../final_binaries/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: godot-templates-${{ matrix.platform }}
           path: final_binaries/*
 
-  #############################################
-  # DragonBones Plugin
-  #############################################
   build-dragonbones-plugin:
     runs-on: ${{ matrix.os }}
-    name: DB-${{ matrix.platform }}
-    continue-on-error: true
     strategy:
-      fail-fast: false
       matrix:
         include:
           - {platform: windows, os: windows-latest, arch: x86_64}
           - {platform: linux, os: ubuntu-latest, arch: x86_64}
           - {platform: web, os: ubuntu-latest, arch: wasm32}
           - {platform: android, os: ubuntu-latest, arch: arm64}
-    
     steps:
       - uses: actions/setup-python@v5
         with: {python-version: '3.x'}
       - run: python -m pip install scons==4.4
-
       - if: matrix.platform == 'windows'
         uses: e-t-l/setup-mingw@patch-1
-
       - if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config
-
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config
       - if: matrix.platform == 'android'
         uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r23c
-          link-to-sdk: true
-
+        with: {ndk-version: r23c, link-to-sdk: true}
       - if: matrix.platform == 'web'
         uses: mymindstorm/setup-emsdk@v14
         with: {version: '4.0.0'}
-
       - uses: actions/checkout@v4
         with:
           repository: Daylily-Zeleen/Godot-DragonBones
           ref: master
           submodules: recursive
           path: dragonbones
-
       - working-directory: dragonbones
         shell: bash
-        run: |
-          scons target=template_release \
-            platform=${{ matrix.platform }} \
-            arch=${{ matrix.arch }} \
-            debug_symbols=no
-
+        run: scons target=template_release platform=${{ matrix.platform }} arch=${{ matrix.arch }} debug_symbols=no
       - uses: actions/upload-artifact@v4
         with:
           name: dragonbones-${{ matrix.platform }}
           path: dragonbones/demo/addons/godot_dragon_bones.daylily-zeleen/
           if-no-files-found: warn
 
-  #############################################
-  # Package Everything
-  #############################################
   package-release:
     runs-on: ubuntu-latest
     needs: [build-godot-editor, build-godot-templates, build-dragonbones-plugin]
     if: always()
-    
     steps:
       - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Template Structure
-        run: |
+        with: {path: artifacts}
+      - run: |
           mkdir -p export_templates/${{ env.GODOT_VERSION }}.stable
-          find artifacts/godot-templates-* -type f -exec cp -v {} export_templates/${{ env.GODOT_VERSION }}.stable/ \;
-
-      - name: Package Editor
+          find artifacts/godot-templates-* -type f -exec cp {} export_templates/${{ env.GODOT_VERSION }}.stable/ \;
+      - run: cd artifacts/godot-editor-windows && zip -9 ../../godot-editor-${{ env.GODOT_VERSION }}.zip * && cd ../..
+      - run: cd export_templates && zip -9 -r ../godot-templates-${{ env.GODOT_VERSION }}.zip . && cd ..
+      - shell: bash
         run: |
-          cd artifacts/godot-editor-windows
-          zip -9 ../../godot-editor-${{ env.GODOT_VERSION }}.zip *
-          cd ../..
-
-      - name: Package Templates
-        run: |
-          cd export_templates
-          zip -9 -r ../godot-templates-${{ env.GODOT_VERSION }}.zip .
-          cd ..
-
-      - name: Package DragonBones
-        run: |
-          mkdir -p dragonbones-merged/addons
-          find artifacts/dragonbones-* -type d -name "godot_dragon_bones.daylily-zeleen" -exec cp -r {}/* dragonbones-merged/addons/ \; 2>/dev/null || true
-          cd dragonbones-merged
-          zip -9 -r ../dragonbones-latest.zip .
-          cd ..
-
-      - name: Generate Checksums
-        run: sha256sum *.zip > checksums.txt
-
-      - name: Create Release Notes
-        run: |
+          mkdir -p dragonbones-merged/addons/godot_dragon_bones.daylily-zeleen/bin
+          for dir in artifacts/dragonbones-*; do
+            [ -d "$dir" ] && cp -r "$dir"/* dragonbones-merged/addons/godot_dragon_bones.daylily-zeleen/ 2>/dev/null || true
+          done
+          [ $(find dragonbones-merged -type f | wc -l) -eq 0 ] && echo "Plugin build issue. Download artifacts from Actions." > dragonbones-merged/README.txt
+          cd dragonbones-merged && zip -9 -r ../dragonbones-latest.zip . && cd ..
+      - run: sha256sum *.zip > checksums.txt
+      - run: |
           cat > RELEASE_NOTES.md << 'EOF'
-          # Godot ${{ env.GODOT_VERSION }} Complete Bundle
+          # Godot ${{ env.GODOT_VERSION }} Bundle
+          Build: $(date -u +"%Y-%m-%d %H:%M UTC") | Run: #${{ github.run_number }}
           
-          Build: $(date -u +"%Y-%m-%d %H:%M UTC")
-          
-          ## Files
-          - Editor: ~70 MB
-          - Templates: ~150 MB
-          - DragonBones: ~2 MB
+          ## Packages
+          - Editor (~70MB) | Templates (~150MB) | DragonBones (~2MB)
           
           ## Installation
-          Extract archives to appropriate directories.
-          See README for details.
+          **Editor:** `unzip godot-editor-${{ env.GODOT_VERSION }}.zip`
+          **Templates (Win):** `unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d %APPDATA%\Godot\export_templates\${{ env.GODOT_VERSION }}.stable\`
+          **Templates (Linux):** `unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/`
+          **Plugin:** `cd your-game && unzip dragonbones-latest.zip` then enable in Project Settings
+          
+          ## Checksums
+          ```
+          $(cat checksums.txt)
+          ```
           EOF
-
       - uses: actions/upload-artifact@v4
         with:
           name: complete-bundle
@@ -305,19 +170,14 @@ jobs:
             *.zip
             checksums.txt
             RELEASE_NOTES.md
-
-      - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2  # ✅ Updated to v2
+      - if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.GODOT_VERSION }}-build${{ github.run_number }}
-          name: Godot ${{ env.GODOT_VERSION }} Build #${{ github.run_number }}
+          tag_name: v${{ env.GODOT_VERSION }}-${{ github.run_number }}
+          name: "Godot ${{ env.GODOT_VERSION }} Build #${{ github.run_number }}"
           body_path: RELEASE_NOTES.md
           files: |
             godot-editor-${{ env.GODOT_VERSION }}.zip
             godot-templates-${{ env.GODOT_VERSION }}.zip
             dragonbones-latest.zip
             checksums.txt
-          draft: false
-          prerelease: false
-          make_latest: true
