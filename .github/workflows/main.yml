@@ -145,23 +145,46 @@ jobs:
           cd dragonbones-merged && zip -9 -r ../dragonbones-latest.zip . && cd ..
       - run: sha256sum *.zip > checksums.txt
       - run: |
-          cat > RELEASE_NOTES.md << 'EOF'
+          cat > RELEASE_NOTES.md << EOF
           # Godot ${{ env.GODOT_VERSION }} Bundle
-          Build: $(date -u +"%Y-%m-%d %H:%M UTC") | Run: #${{ github.run_number }}
           
-          ## Packages
-          - Editor (~70MB) | Templates (~150MB) | DragonBones (~2MB)
+          **Build:** $(date -u +"%Y-%m-%d %H:%M UTC")  
+          **Run:** #${{ github.run_number }}
           
-          ## Installation
-          **Editor:** `unzip godot-editor-${{ env.GODOT_VERSION }}.zip`
-          **Templates (Win):** `unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d %APPDATA%\Godot\export_templates\${{ env.GODOT_VERSION }}.stable\`
-          **Templates (Linux):** `unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/`
-          **Plugin:** `cd your-game && unzip dragonbones-latest.zip` then enable in Project Settings
+          ## 📦 Packages
+          - Editor: ~70 MB
+          - Templates: ~150 MB
+          - DragonBones: ~2 MB
           
-          ## Checksums
-          ```
+          ## 📥 Installation
+          
+          ### Editor
+          \`\`\`bash
+          unzip godot-editor-${{ env.GODOT_VERSION }}.zip
+          \`\`\`
+          
+          ### Templates (Windows)
+          \`\`\`cmd
+          unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d %APPDATA%\\Godot\\export_templates\\${{ env.GODOT_VERSION }}.stable\\
+          \`\`\`
+          
+          ### Templates (Linux)
+          \`\`\`bash
+          unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/
+          \`\`\`
+          
+          ### DragonBones Plugin
+          \`\`\`bash
+          cd your-game
+          unzip dragonbones-latest.zip
+          \`\`\`
+          
+          Then enable in **Project Settings → Plugins**
+          
+          ## 🔍 Checksums
+          \`\`\`
           $(cat checksums.txt)
-          ```
+          \`\`\`
           EOF
       - uses: actions/upload-artifact@v4
         with:
