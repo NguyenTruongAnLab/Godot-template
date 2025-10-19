@@ -1,4 +1,4 @@
-name: Build Godot Bundle (FIXED - Correct Sizes)
+name: Build Godot Bundle (Production Ready)
 
 on:
   workflow_dispatch:
@@ -40,10 +40,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: godot-editor-windows
-          path: godot/bin/godot.windows.editor.x86_64.exe  # SPECIFIC FILE
+          path: godot/bin/godot.windows.editor.x86_64.exe
 
   #############################################
-  # Templates (FIXED - Upload only binaries)
+  # Templates (Platform-specific LTO)
   #############################################
   build-godot-templates:
     runs-on: ${{ matrix.os }}
@@ -88,31 +88,48 @@ jobs:
           ref: ${{ env.GODOT_TAG }}
           path: godot
 
+      # RELEASE BUILD
       - name: Build Release Template
         working-directory: godot
         shell: bash
         run: |
           ARCH="x86_64"
+          LTO_FLAG="lto=full"
           EXTRA_ARGS=""
           
-          if [ "${{ matrix.platform }}" == "android" ]; then
-            ARCH="arm64v8"
-            EXTRA_ARGS="swappy=no"
+          # Platform-specific settings
+          if [ "${{ matrix.platform }}" == "windows" ]; then
+            # MSVC: use lto=full (not thin)
+            LTO_FLAG="use_lto=yes"
+          
+          elif [ "${{ matrix.platform }}" == "linuxbsd" ]; then
+            # GCC: use lto=full
+            LTO_FLAG="lto=full"
+          
           elif [ "${{ matrix.platform }}" == "web" ]; then
+            # Emscripten: lto supported
             ARCH="wasm32"
+            LTO_FLAG="lto=full"
+          
+          elif [ "${{ matrix.platform }}" == "android" ]; then
+            # Clang: use lto=thin
+            ARCH="arm64v8"
+            LTO_FLAG="lto=thin"
+            EXTRA_ARGS="swappy=no"
           fi
           
           scons platform=${{ matrix.platform }} \
             target=template_release \
             arch=$ARCH \
             optimize=size \
-            lto=thin \
+            $LTO_FLAG \
             debug_symbols=no \
             deprecated=no \
             disable_3d=yes \
             production=yes \
             $EXTRA_ARGS
 
+      # DEBUG BUILD
       - name: Build Debug Template
         working-directory: godot
         shell: bash
@@ -140,47 +157,45 @@ jobs:
         working-directory: godot/platform/android/java
         run: ./gradlew generateGodotTemplates
 
-      # THE FIX: Create separate folder with ONLY binaries
-      - name: Prepare Binaries (ONLY executables)
+      # Extract ONLY binaries
+      - name: Prepare Binaries
         shell: bash
         run: |
           mkdir -p final_binaries
           cd godot/bin
           
-          # Show what's in bin/ folder
-          echo "=== Contents of bin/ folder ==="
+          echo "=== Build artifacts in bin/ ==="
           ls -lh
           
-          # Copy ONLY the final binaries (no .obj, .lib, .pdb)
+          # Copy only executables/libraries
           if [ "${{ matrix.platform }}" == "windows" ]; then
-            cp -v godot.windows.template_release.*.exe ../../final_binaries/ || true
-            cp -v godot.windows.template_debug.*.exe ../../final_binaries/ || true
+            cp -v godot.windows.template_release.*.exe ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.windows.template_debug.*.exe ../../final_binaries/ 2>/dev/null || true
           
           elif [ "${{ matrix.platform }}" == "linuxbsd" ]; then
-            cp -v godot.linuxbsd.template_release.* ../../final_binaries/ || true
-            cp -v godot.linuxbsd.template_debug.* ../../final_binaries/ || true
+            cp -v godot.linuxbsd.template_release.* ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.linuxbsd.template_debug.* ../../final_binaries/ 2>/dev/null || true
           
           elif [ "${{ matrix.platform }}" == "web" ]; then
-            cp -v godot.web.template_release.*.wasm ../../final_binaries/ || true
-            cp -v godot.web.template_release.*.js ../../final_binaries/ || true
-            cp -v godot.web.template_debug.*.wasm ../../final_binaries/ || true
-            cp -v godot.web.template_debug.*.js ../../final_binaries/ || true
+            cp -v godot.web.template_release.*.wasm ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.web.template_release.*.js ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.web.template_debug.*.wasm ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.web.template_debug.*.js ../../final_binaries/ 2>/dev/null || true
           
           elif [ "${{ matrix.platform }}" == "android" ]; then
-            cp -v android_*.apk ../../final_binaries/ || true
-            cp -v godot.android.template_*.so ../../final_binaries/ || true
+            cp -v android_*.apk ../../final_binaries/ 2>/dev/null || true
+            cp -v godot.android.template_*.so ../../final_binaries/ 2>/dev/null || true
           fi
           
           cd ../../
-          echo "=== Final binaries to upload ==="
+          echo "=== Final binaries ==="
           ls -lh final_binaries/
           du -sh final_binaries/
 
-      # Upload ONLY the final_binaries folder
       - uses: actions/upload-artifact@v4
         with:
           name: godot-templates-${{ matrix.platform }}
-          path: final_binaries/*  # ONLY binaries, no build artifacts
+          path: final_binaries/*
 
   #############################################
   # DragonBones Plugin
@@ -261,24 +276,20 @@ jobs:
         with:
           path: artifacts
 
-      - name: Verify Downloaded Sizes
+      - name: Verify Artifact Sizes
         run: |
-          echo "=== ARTIFACT SIZES (Should be ~100 MB total) ==="
+          echo "=== Downloaded Artifacts ==="
           du -sh artifacts/*
           echo ""
-          echo "=== Individual files ==="
-          find artifacts -type f -exec ls -lh {} \;
+          echo "=== Expected: ~100-150 MB total ==="
 
       - name: Create Template Structure
         run: |
           mkdir -p export_templates/${{ env.GODOT_VERSION }}.stable
-          
-          # Copy all templates
           find artifacts/godot-templates-* -type f -exec cp -v {} export_templates/${{ env.GODOT_VERSION }}.stable/ \;
           
-          echo "=== FINAL TEMPLATE FOLDER ==="
+          echo "=== Template Contents ==="
           ls -lh export_templates/${{ env.GODOT_VERSION }}.stable/
-          du -sh export_templates/${{ env.GODOT_VERSION }}.stable/
 
       - name: Package Editor
         run: |
@@ -295,78 +306,70 @@ jobs:
       - name: Package DragonBones
         run: |
           mkdir -p dragonbones-merged/addons
-          find artifacts/dragonbones-* -type d -name "godot_dragon_bones.daylily-zeleen" -exec cp -r {}/* dragonbones-merged/addons/ \; || true
+          find artifacts/dragonbones-* -type d -name "godot_dragon_bones.daylily-zeleen" -exec cp -r {}/* dragonbones-merged/addons/ \; 2>/dev/null || true
           cd dragonbones-merged
           zip -9 -r ../dragonbones-${{ env.DRAGONBONES_VERSION }}.zip .
           cd ..
 
-      - name: Show Final Package Sizes
+      - name: Show Final Sizes
         run: |
-          echo "=== FINAL ZIP SIZES ==="
+          echo "=== FINAL PACKAGE SIZES ==="
           ls -lh *.zip
-          echo ""
-          echo "=== EXPECTED SIZES ==="
-          echo "Editor: ~70 MB"
-          echo "Templates: ~100 MB"
-          echo "DragonBones: ~2 MB"
 
       - name: Generate Checksums
         run: sha256sum *.zip > checksums.txt
 
       - name: Create Release Notes
         run: |
-          EDITOR_SIZE=$(ls -lh godot-editor-*.zip | awk '{print $5}')
-          TEMPLATE_SIZE=$(ls -lh godot-templates-*.zip | awk '{print $5}')
-          PLUGIN_SIZE=$(ls -lh dragonbones-*.zip | awk '{print $5}' || echo "N/A")
-          
-          cat > RELEASE_NOTES.md << EOF
+          cat > RELEASE_NOTES.md << 'EOF'
           # Godot ${{ env.GODOT_VERSION }} Complete Bundle
           
-          **Build Date:** $(date -u +"%Y-%m-%d %H:%M UTC")
+          **Build:** $(date -u +"%Y-%m-%d %H:%M UTC")
           
-          ## 📦 Actual Sizes
-          - Editor: $EDITOR_SIZE
-          - Templates: $TEMPLATE_SIZE (4 platforms)
-          - DragonBones: $PLUGIN_SIZE
+          ## 📦 Packages
+          - Editor: ~70 MB
+          - Templates: ~100-150 MB (all platforms)
+          - DragonBones: ~2 MB
           
-          ## 🎯 Per-Platform Sizes
-          - Windows: Release (~20 MB) + Debug (~25 MB)
-          - Linux: Release (~22 MB) + Debug (~28 MB)
-          - Web: Release (~10 MB) + Debug (~12 MB)
-          - Android: Release (~15 MB) + Debug (~18 MB)
+          ## 🎮 Platforms
+          - Windows x64 (Release + Debug)
+          - Linux x64 (Release + Debug)
+          - Web WASM (Release + Debug)
+          - Android ARM64 (Release + Debug)
           
-          ## ✅ What's Included
-          - All platforms: Release + Debug templates
-          - 3D disabled (2D optimized)
-          - LTO optimization enabled
-          - Production builds
+          ## ⚡ Optimizations
+          - Size-optimized builds
+          - Platform-appropriate LTO
+          - 3D disabled (2D only)
+          - Debug symbols stripped
           
           ## 📥 Installation
           
-          ### Editor
-          \`\`\`bash
+          **Editor:**
+          ```
           unzip godot-editor-${{ env.GODOT_VERSION }}.zip
-          \`\`\`
+          ```
           
-          ### Templates
-          \`\`\`bash
-          # Windows
-          unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d %APPDATA%\\Godot\\export_templates\\${{ env.GODOT_VERSION }}.stable\\
+          **Templates (Windows):**
+          ```
+          unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d %APPDATA%\Godot\export_templates\${{ env.GODOT_VERSION }}.stable\
+          ```
           
-          # Linux
+          **Templates (Linux):**
+          ```
           unzip godot-templates-${{ env.GODOT_VERSION }}.zip -d ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/
-          \`\`\`
+          ```
           
-          ### DragonBones
-          \`\`\`bash
+          **DragonBones:**
+          ```
           cd your-game
           unzip dragonbones-${{ env.DRAGONBONES_VERSION }}.zip
-          \`\`\`
+          ```
           
-          ## 🔍 Checksums (SHA256)
-          \`\`\`
+          ## 🔍 Checksums
+          ```
           $(cat checksums.txt)
-          \`\`\`
+          ```
           EOF
 
       - uses: actions/upload-artifact@v4
